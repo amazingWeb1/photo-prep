@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html>
+<!-- Previous head and style sections remain the same -->
+<head>
+    <title>Photo Prep Tool</title>
+    <style>
+        /* Previous styles remain the same */
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            gap: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        .upload-btn {
+            background-color: #3b82f6;
+            color: white;
+        }
+        .download-btn {
+            background-color: #22c55e;
+            color: white;
+        }
+        .download-btn:disabled {
+            background-color: #9ca3af;
+            cursor: not-allowed;
+        }
+        .controls {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .pan-controls {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+        }
+        .control-btn {
+            background-color: #6b7280;
+            color: white;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .control-btn:disabled {
+            background-color: #9ca3af;
+            cursor: not-allowed;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            max-width: 600px;
+        }
+        select {
+            padding: 8px;
+            font-size: 16px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        .zoom-controls {
+            display: flex;
+            gap: 5px;
+        }
+        .instructions {
+            max-width: 600px;
+            color: #4b5563;
+            font-size: 14px;
+        }
+        .instructions ol {
+            padding-left: 20px;
+        }
+        .mode-select {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="mode-select">
+        <select id="modeSelect" onchange="updateMode()">
+            <option value="ornament">Ornament (1.75" × 2.75" with border)</option>
+            <option value="heart">Heart Ornament (2.375" × 3.15625" with top/bottom borders)</option>
+            <option value="square3">Square 3" × 3"</option>
+            <option value="square4">Square 4" × 4"</option>
+        </select>
+    </div>
+
+    <!-- Previous controls and canvas elements remain the same -->
+    <div class="controls">
+        <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+            Upload Photo
+        </button>
+        <button class="download-btn" onclick="downloadImage()" id="downloadBtn" disabled>
+            Download Print-Ready Photo
+        </button>
+        <input type="file" id="fileInput" accept="image/*" style="display: none" onchange="handleImageUpload(event)">
+    </div>
+
+    <div class="controls">
+        <div class="pan-controls">
+            <button class="control-btn" onclick="pan(-10, 0)" id="panLeftBtn" disabled>←</button>
+            <button class="control-btn" onclick="pan(0, -10)" id="panUpBtn" disabled>↑</button>
+            <button class="control-btn" onclick="pan(10, 0)" id="panRightBtn" disabled>→</button>
+            <button class="control-btn" onclick="pan(0, 0)" id="panCenterBtn" disabled>⌖</button>
+            <button class="control-btn" onclick="pan(0, 10)" id="panDownBtn" disabled>↓</button>
+        </div>
+        <div class="zoom-controls">
+            <button class="control-btn" onclick="zoom(1.1)" id="zoomInBtn" disabled>+</button>
+            <button class="control-btn" onclick="zoom(0.9)" id="zoomOutBtn" disabled>-</button>
+            <button class="control-btn" onclick="resetZoom()" id="zoomResetBtn" disabled>↺</button>
+        </div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <div class="instructions">
+        <p>Instructions:</p>
+        <ol>
+            <li>Select mode: Classic Ornament, Heart Ornament, or Square format</li>
+            <li>Upload your photo</li>
+            <li>Use arrow buttons to position the photo</li>
+            <li>Use +/- buttons to zoom in/out</li>
+            <li>Download and print at Walgreens as a 4×6" photo</li>
+            <li>Cut along the guide lines</li>
+        </ol>
+    </div>
+
+    <script>
+        const PRINT_DPI = 300;
+        const PHOTO_WIDTH = 6 * PRINT_DPI;  // 6 inches
+        const PHOTO_HEIGHT = 4 * PRINT_DPI;  // 4 inches
+        const ORNAMENT_VISIBLE_WIDTH = 1.75 * PRINT_DPI;
+        const ORNAMENT_VISIBLE_HEIGHT = 2.75 * PRINT_DPI;
+        const ORNAMENT_SLOT_WIDTH = 2.125 * PRINT_DPI;
+        const ORNAMENT_SLOT_HEIGHT = 3.1875 * PRINT_DPI;
+        const HEART_PAPER_WIDTH = 2.375 * PRINT_DPI;  // 2 3/8 inches
+        const HEART_PAPER_HEIGHT = 3.15625 * PRINT_DPI;  // 3 5/32 inches
+        const HEART_BORDER = 0.375 * PRINT_DPI;  // 3/8 inch border
+
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let currentImage = null;
+        let panX = 0;
+        let panY = 0;
+        let zoomLevel = 1;
+        let currentMode = 'ornament';
+
+        // Set canvas size
+        canvas.width = PHOTO_WIDTH;
+        canvas.height = PHOTO_HEIGHT;
+        canvas.style.width = '600px';
+
+        // Previous helper functions remain the same
+        function updateMode() {
+            currentMode = document.getElementById('modeSelect').value;
+            if (currentImage) {
+                panX = 0;
+                panY = 0;
+                zoomLevel = 1;
+                drawGuides(currentImage);
+            } else {
+                drawGuides();
+            }
+        }
+
+        function handleImageUpload(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        currentImage = img;
+                        panX = 0;
+                        panY = 0;
+                        zoomLevel = 1;
+                        drawGuides(img);
+                        enableControls();
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function enableControls() {
+            const buttons = ['downloadBtn', 'panLeftBtn', 'panRightBtn', 'panUpBtn', 
+                           'panDownBtn', 'panCenterBtn', 'zoomInBtn', 'zoomOutBtn', 'zoomResetBtn'];
+            buttons.forEach(id => document.getElementById(id).disabled = false);
+        }
+
+        function pan(x, y) {
+            if (currentImage) {
+                if (x === 0 && y === 0) {
+                    panX = 0;
+                    panY = 0;
+                } else {
+                    panX += x;
+                    panY += y;
+                }
+                drawGuides(currentImage);
+            }
+        }
+
+        function zoom(factor) {
+            if (currentImage) {
+                zoomLevel *= factor;
+                zoomLevel = Math.max(0.5, Math.min(3, zoomLevel));
+                drawGuides(currentImage);
+            }
+        }
+
+        function resetZoom() {
+            if (currentImage) {
+                zoomLevel = 1;
+                drawGuides(currentImage);
+            }
+        }
+
+        function drawGuides(img) {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw white background
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Calculate dimensions based on mode
+            let visibleWidth, visibleHeight, slotWidth, slotHeight;
+            if (currentMode === 'ornament') {
+                visibleWidth = ORNAMENT_VISIBLE_WIDTH;
+                visibleHeight = ORNAMENT_VISIBLE_HEIGHT;
+                slotWidth = ORNAMENT_SLOT_WIDTH;
+                slotHeight = ORNAMENT_SLOT_HEIGHT;
+            } else if (currentMode === 'heart') {
+                visibleWidth = HEART_PAPER_WIDTH;
+                visibleHeight = HEART_PAPER_HEIGHT - (2 * HEART_BORDER);
+                slotWidth = HEART_PAPER_WIDTH;
+                slotHeight = HEART_PAPER_HEIGHT;
+            } else {
+                const size = parseInt(currentMode.replace('square', ''));
+                visibleWidth = visibleHeight = size * PRINT_DPI;
+                slotWidth = slotHeight = size * PRINT_DPI;
+            }
+            
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+
+            // Draw uploaded image if available
+            if (img) {
+                const scale = Math.max(visibleWidth / img.width, visibleHeight / img.height) * zoomLevel;
+                const scaledWidth = img.width * scale;
+                const scaledHeight = img.height * scale;
+                
+                const sourceX = ((scaledWidth - visibleWidth) / (2 * scale)) + (panX / scale);
+                const sourceY = ((scaledHeight - visibleHeight) / (2 * scale)) + (panY / scale);
+                const sourceWidth = visibleWidth / scale;
+                const sourceHeight = visibleHeight / scale;
+                
+                ctx.drawImage(
+                    img,
+                    sourceX, sourceY, sourceWidth, sourceHeight,
+                    centerX - visibleWidth / 2,
+                    centerY - visibleHeight / 2,
+                    visibleWidth,
+                    visibleHeight
+                );
+            }
+
+            // Draw guides
+            if (currentMode === 'ornament') {
+                // Draw slot outline (outer border)
+                ctx.strokeStyle = '#FF0000';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(
+                    centerX - slotWidth / 2,
+                    centerY - slotHeight / 2,
+                    slotWidth,
+                    slotHeight
+                );
+
+                // Draw visible area (inner border)
+                ctx.strokeStyle = '#0000FF';
+                ctx.strokeRect(
+                    centerX - visibleWidth / 2,
+                    centerY - visibleHeight / 2,
+                    visibleWidth,
+                    visibleHeight
+                );
+
+                // Add legend
+                ctx.font = '16px Arial';
+                ctx.fillStyle = 'black';
+                ctx.fillText('Red: Cut Line (2 1/8" × 3 3/16")', 20, 30);
+                ctx.fillText('Blue: Visible Area (1.75" × 2.75")', 20, 60);
+            } else if (currentMode === 'heart') {
+                // Draw full paper outline (red)
+                ctx.strokeStyle = '#FF0000';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(
+                    centerX - slotWidth / 2,
+                    centerY - slotHeight / 2,
+                    slotWidth,
+                    slotHeight
+                );
+
+                // Draw visible area (blue)
+                ctx.strokeStyle = '#0000FF';
+                ctx.strokeRect(
+                    centerX - visibleWidth / 2,
+                    centerY - visibleHeight / 2,
+                    visibleWidth,
+                    visibleHeight
+                );
+
+                // Add legend
+                ctx.font = '16px Arial';
+                ctx.fillStyle = 'black';
+                ctx.fillText('Red: Cut Line (2 3/8" × 3 5/32")', 20, 30);
+                ctx.fillText('Blue: Visible Area (2 3/8" × 2 13/32")', 20, 60);
+            } else {
+                // Draw square outline
+                ctx.strokeStyle = '#0000FF';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(
+                    centerX - visibleWidth / 2,
+                    centerY - visibleHeight / 2,
+                    visibleWidth,
+                    visibleHeight
+                );
+
+                // Add legend
+                ctx.font = '16px Arial';
+                ctx.fillStyle = 'black';
+                const size = parseInt(currentMode.replace('square', ''));
+                ctx.fillText(`Blue: Cut Line (${size}" × ${size}")`, 20, 30);
+            }
+
+            // Add zoom level indicator
+            ctx.fillText(`Zoom: ${(zoomLevel * 100).toFixed(0)}%`, 20, canvas.height - 20);
+        }
+
+        function downloadImage() {
+            const link = document.createElement('a');
+            const mode = currentMode === 'ornament' ? 'ornament' : 
+                        currentMode === 'heart' ? 'heart-ornament' :
+                        `square-${currentMode.replace('square', '')}inch`;
+            link.download = `photo-${mode}.jpg`;
+            link.href = canvas.toDataURL('image/jpeg', 1.0);
+            link.click();
+        }
+
+        // Draw initial guide lines
+        drawGuides();
+    </script>
+</body>
+</html>
